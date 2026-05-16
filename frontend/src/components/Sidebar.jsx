@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom'
+import ThemeToggle from './ThemeToggle.jsx'
 
 /**
  * Жёстко прописанное меню — структура известна заранее, лишний запрос к API
@@ -55,9 +56,25 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="brand">
-        &gt; JAVA<br />
-        &nbsp;&nbsp;PATTERNS<span className="blink">_</span>
+        <img
+          className="brand-logo dark"
+          src="/logo-dark.png"
+          alt="JAVA PATTERNS"
+          onError={e => { e.currentTarget.style.display = 'none' }}
+        />
+        <img
+          className="brand-logo light"
+          src="/logo-light.png"
+          alt="JAVA PATTERNS"
+          onError={e => { e.currentTarget.style.display = 'none' }}
+        />
+        <span className="brand-text">
+          &gt; JAVA<br />
+          &nbsp;&nbsp;PATTERNS<span className="blink">_</span>
+        </span>
       </div>
+
+      <ThemeToggle />
 
       <NavLink to="/" end className={({isActive}) => 'nav-link' + (isActive ? ' active' : '')}>
         ★ Главная

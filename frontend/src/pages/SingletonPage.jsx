@@ -4,23 +4,21 @@ import CodeBlock from '../components/CodeBlock.jsx'
 import { StepTimeline, InstanceGrid, Verdict } from '../components/Visualization.jsx'
 
 export default function SingletonPage() {
-  const [good, setGood] = useState(null)
-  const [bad, setBad] = useState(null)
-  const [loadingGood, setLoadingGood] = useState(false)
-  const [loadingBad, setLoadingBad] = useState(false)
+  // Одно окно результата: новый запуск заменяет предыдущий, а не добавляет ниже.
+  const [result, setResult] = useState(null)   // { data, variant } | null
+  const [loading, setLoading] = useState(null) // 'good' | 'bad' | null
   const [error, setError] = useState(null)
 
-  const runGood = async () => {
-    setError(null); setLoadingGood(true); setGood(null)
-    try { setGood(await api.singletonGood()) }
-    catch (e) { setError(e.message) }
-    finally { setLoadingGood(false) }
-  }
-  const runBad = async () => {
-    setError(null); setLoadingBad(true); setBad(null)
-    try { setBad(await api.singletonBad()) }
-    catch (e) { setError(e.message) }
-    finally { setLoadingBad(false) }
+  const run = async (variant) => {
+    setError(null); setLoading(variant); setResult(null)
+    try {
+      const data = variant === 'good' ? await api.singletonGood() : await api.singletonBad()
+      setResult({ data, variant })
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(null)
+    }
   }
 
   return (
@@ -43,11 +41,11 @@ export default function SingletonPage() {
       </div>
 
       <div>
-        <button className="btn good" disabled={loadingGood} onClick={runGood}>
-          {loadingGood ? 'RUNNING…' : '▶ Запустить хороший'}
+        <button className="btn good" disabled={loading !== null} onClick={() => run('good')}>
+          {loading === 'good' ? 'RUNNING…' : '▶ Запустить хороший'}
         </button>
-        <button className="btn bad" disabled={loadingBad} onClick={runBad}>
-          {loadingBad ? 'RUNNING…' : '▶ Запустить плохой'}
+        <button className="btn bad" disabled={loading !== null} onClick={() => run('bad')}>
+          {loading === 'bad' ? 'RUNNING…' : '▶ Запустить плохой'}
         </button>
       </div>
 
@@ -61,8 +59,7 @@ export default function SingletonPage() {
         </div>
       )}
 
-      <ResultPanel result={good} variant="good" />
-      <ResultPanel result={bad}  variant="bad" />
+      {result && <ResultPanel result={result.data} variant={result.variant} />}
     </div>
   )
 }
