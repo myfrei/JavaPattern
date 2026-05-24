@@ -1,25 +1,25 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
-import Sidebar from './components/Sidebar.jsx'
-import Home from './pages/Home.jsx'
-import GroupPage from './pages/GroupPage.jsx'
-import MicroservicesPage from './pages/MicroservicesPage.jsx'
-import SingletonPage from './pages/SingletonPage.jsx'
-import ComingSoonPage from './pages/ComingSoonPage.jsx'
+import SectionPick from './pages/SectionPick.jsx'
+import Categories from './pages/Categories.jsx'
+import PatternList from './pages/PatternList.jsx'
+import PatternDetail from './pages/PatternDetail.jsx'
+import Sandbox from './pages/Sandbox.jsx'
+import ComingSoon from './pages/ComingSoon.jsx'
 
 export default function App() {
   return (
-    <div className="app">
-      <Sidebar />
-      <main className="main">
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/design" element={<Navigate to="/design/creational" replace />} />
-          <Route path="/design/:group" element={<GroupPage />} />
-          <Route path="/design/creational/singleton" element={<SingletonPage />} />
-          <Route path="/microservices" element={<MicroservicesPage />} />
-          <Route path="*" element={<ComingSoonPage />} />
-        </Routes>
-      </main>
-    </div>
+    <Routes>
+      <Route path="/" element={<SectionPick />} />
+      <Route path="/patterns" element={<Navigate to="/patterns/design" replace />} />
+      <Route path="/patterns/design" element={<Categories />} />
+      <Route path="/patterns/design/:category" element={<PatternList />} />
+      <Route path="/patterns/design/:category/:patternId" element={<PatternDetail />} />
+      <Route path="/patterns/design/:category/:patternId/sandbox" element={<Sandbox />} />
+      <Route
+        path="/patterns/microservices"
+        element={<ComingSoon title="Microservices · скоро" sub="Каталог микросервисных паттернов в работе. Пока доступны Design Patterns." />}
+      />
+      <Route path="*" element={<ComingSoon title="404" sub="Такой страницы нет." />} />
+    </Routes>
   )
 }

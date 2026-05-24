@@ -1,0 +1,30 @@
+name: javapattern
+
+services:
+  backend:
+    build:
+      context: ./backend
+    image: javapattern-backend
+    container_name: javapattern-backend
+    ports:
+      - "8080:8080"
+    healthcheck:
+      # temurin runtime is Ubuntu-based, so bash + /dev/tcp are available
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/8080' 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 40s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    image: javapattern-frontend
+    container_name: javapattern-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
