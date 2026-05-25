@@ -987,6 +987,137 @@ export function PubSubViz({ result, frame }) {
   )
 }
 
+// Saga — steps with compensations (good) vs partial commit (bad).
+export function SagaViz({ result, frame }) {
+  const instances = result?.instances || []
+  const broken = result?.broken
+  const activeName = frame?.actor
+  return (
+    <div className="col gap-10 center" style={{ height: '100%', justifyContent: 'center' }}>
+      <div className="tiny upper text-muted">{broken ? 'partial commit · inconsistent' : 'saga + compensations'}</div>
+      <div className="row gap-4 center wrap" style={{ alignItems: 'center' }}>
+        {instances.map((s, i) => {
+          const active = s.hash === activeName
+          const role = s.createdBy // committed | compensated | failed
+          let bg = 'var(--paper)', fg = 'var(--ink)'
+          if (role === 'compensated') { bg = 'var(--good)'; fg = 'var(--paper)' }
+          else if (role === 'committed' || role === 'failed') { bg = 'var(--bad)'; fg = 'var(--paper)' }
+          if (active) { bg = 'var(--accent-3)'; fg = 'var(--paper)' }
+          const tag = role === 'compensated' ? '↩ rolled back' : role === 'committed' ? '⚠ committed' : role === 'failed' ? '✗ failed' : ''
+          return (
+            <Fragment key={i}>
+              {i > 0 && <span style={{ color: 'var(--ink-3)' }}>→</span>}
+              <div className="pix-frame col center" style={{ minWidth: 120, padding: '8px 10px', gap: 2, background: bg, color: fg, border: 'var(--px) solid var(--line)' }}>
+                <span className="small bold" style={{ color: fg }}>{s.hash}</span>
+                <span className="tiny" style={{ color: fg }}>{tag}</span>
+              </div>
+            </Fragment>
+          )
+        })}
+      </div>
+      <VizStatus text={frame ? `${frame.action} → ${frame.result}` : (broken ? 'ранние шаги закоммичены — рассинхрон' : 'компенсации откатили завершённые шаги')}
+                 color={broken ? 'var(--bad)' : stepTone(frame)} />
+    </div>
+  )
+}
+
+// CQRS — separate write/read sides (good) vs one model (bad).
+export function CqrsViz({ result, frame }) {
+  const instances = result?.instances || []
+  const broken = result?.broken
+  const activeName = frame?.actor
+  if (broken) {
+    const m = instances[0]
+    return (
+      <div className="col gap-10 center" style={{ height: '100%', justifyContent: 'center' }}>
+        <div className="tiny upper text-muted">one model · reads + writes</div>
+        <VizBox title={m?.hash || 'Model'} sub="reads ⇄ writes" active bad minWidth={200} />
+        <span className="tiny" style={{ color: 'var(--bad)' }}>запрос пересчитывает по всему логу</span>
+        <VizStatus text={frame ? `${frame.action} → ${frame.result}` : 'чтение конкурирует с записью'} color="var(--bad)" />
+      </div>
+    )
+  }
+  const write = instances.find(i => i.createdBy === 'commands')
+  const read = instances.find(i => i.createdBy === 'queries')
+  return (
+    <div className="col gap-10 center" style={{ height: '100%', justifyContent: 'center' }}>
+      <div className="tiny upper text-muted">commands | queries</div>
+      <div className="row gap-12 center" style={{ alignItems: 'center' }}>
+        <VizBox title={write?.hash || 'WriteSide'} sub="commands" active={!!write && write.hash === activeName} minWidth={140} />
+        <span style={{ color: 'var(--accent-3)' }}>→ project →</span>
+        <VizBox title={read?.hash || 'ReadSide'} sub="queries" active={!!read && read.hash === activeName} minWidth={140} />
+      </div>
+      <VizStatus text={frame ? `${frame.action} → ${frame.result}` : 'чтение из готовой проекции'} color={stepTone(frame)} />
+    </div>
+  )
+}
+
+// Event Sourcing — append-only event log (good) vs current value only (bad).
+export function EventSourcingViz({ result, frame }) {
+  const instances = result?.instances || []
+  const broken = result?.broken
+  const activeName = frame?.actor
+  if (broken) {
+    const m = instances[0]
+    return (
+      <div className="col gap-10 center" style={{ height: '100%', justifyContent: 'center' }}>
+        <div className="tiny upper text-muted">current value only · no history</div>
+        <VizBox title={m?.hash || 'balance'} sub="mutable, history lost" active bad minWidth={190} />
+        <VizStatus text={frame ? `${frame.action} → ${frame.result}` : 'прошлое стёрто — нет replay'} color="var(--bad)" />
+      </div>
+    )
+  }
+  const reveal = frame?.reveal ?? instances.length
+  const shown = instances.slice(0, Math.max(1, reveal))
+  return (
+    <div className="col gap-10 center" style={{ height: '100%', justifyContent: 'center' }}>
+      <div className="tiny upper text-muted">append-only event log</div>
+      <div className="row gap-6 center wrap" style={{ maxWidth: 480 }}>
+        {shown.map((e, i) => {
+          const active = e.hash === activeName
+          const fg = active ? 'var(--paper)' : 'var(--ink)'
+          return (
+            <Fragment key={i}>
+              {i > 0 && <span style={{ color: 'var(--ink-3)' }}>→</span>}
+              <div className="pix-frame col center" style={{ minWidth: 110, padding: 8, gap: 2, background: active ? 'var(--accent-3)' : 'var(--paper)', color: fg, border: 'var(--px) solid var(--line)' }}>
+                <span className="small bold" style={{ color: fg }}>{e.hash}</span>
+                <span className="tiny" style={{ color: active ? 'var(--paper)' : 'var(--accent)' }}>{e.createdBy}</span>
+              </div>
+            </Fragment>
+          )
+        })}
+      </div>
+      <VizStatus text={frame ? `${frame.action} → ${frame.result}` : 'состояние = свёртка событий'} color={stepTone(frame)} />
+    </div>
+  )
+}
+
+// Transactional Outbox — atomic db+outbox → relay → broker (good) vs dual write (bad).
+export function OutboxViz({ result, frame }) {
+  const instances = result?.instances || []
+  const broken = result?.broken
+  const activeName = frame?.actor
+  return (
+    <div className="col gap-10 center" style={{ height: '100%', justifyContent: 'center' }}>
+      <div className="tiny upper text-muted">{broken ? 'dual write · message lost' : 'db+outbox → relay → broker'}</div>
+      <div className="row gap-4 center wrap" style={{ alignItems: 'center' }}>
+        {instances.map((b, i) => {
+          const active = b.hash === activeName
+          const isBroker = /broker/i.test(b.hash)
+          return (
+            <Fragment key={i}>
+              {i > 0 && <span style={{ color: broken ? 'var(--bad)' : 'var(--accent-3)' }}>{broken && i === 1 ? '✗ crash' : '→'}</span>}
+              <VizBox title={b.hash} sub={b.createdBy} active={active} bad={broken && isBroker} minWidth={130} />
+            </Fragment>
+          )
+        })}
+      </div>
+      <VizStatus text={frame ? `${frame.action} → ${frame.result}` : (broken ? 'сообщение потеряно при падении' : 'сообщение доставлено надёжно')}
+                 color={broken ? 'var(--bad)' : stepTone(frame)} />
+    </div>
+  )
+}
+
 // ─── Viz registry: kind → render fn (uniform props {result, frame, step, cmd}) ───
 export const VIZ = {
   observer: (p) => <ObserverLiveViz {...p} />,
@@ -1021,6 +1152,10 @@ export const VIZ = {
   'service-discovery': (p) => <ServiceDiscoveryViz {...p} />,
   sidecar: (p) => <SidecarViz {...p} />,
   'publish-subscribe': (p) => <PubSubViz {...p} />,
+  saga: (p) => <SagaViz {...p} />,
+  cqrs: (p) => <CqrsViz {...p} />,
+  'event-sourcing': (p) => <EventSourcingViz {...p} />,
+  'transactional-outbox': (p) => <OutboxViz {...p} />,
 }
 
 export function renderViz(kind, props) {

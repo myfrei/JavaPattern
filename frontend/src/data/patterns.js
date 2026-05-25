@@ -91,10 +91,10 @@ const RAW = {
     { name: 'Publish-Subscribe',    ru: 'Издатель-подписчик',  diff: 'easy',   pop: 5, tags: ['async', 'events'], status: 'done' },
   ],
   data: [
-    { name: 'Saga',                 ru: 'Сага',                diff: 'hard',   pop: 5, tags: ['transactions', 'compensation'], status: '' },
-    { name: 'CQRS',                 ru: 'CQRS',                diff: 'hard',   pop: 4, tags: ['read-write'], status: '' },
-    { name: 'Event Sourcing',       ru: 'Источник событий',    diff: 'hard',   pop: 4, tags: ['event-log'], status: '' },
-    { name: 'Transactional Outbox', ru: 'Транзакц. outbox',    diff: 'medium', pop: 3, tags: ['atomicity'], status: '' },
+    { name: 'Saga',                 ru: 'Сага',                diff: 'hard',   pop: 5, tags: ['transactions', 'compensation'], status: 'done' },
+    { name: 'CQRS',                 ru: 'CQRS',                diff: 'hard',   pop: 4, tags: ['read-write'], status: 'done' },
+    { name: 'Event Sourcing',       ru: 'Источник событий',    diff: 'hard',   pop: 4, tags: ['event-log'], status: 'done' },
+    { name: 'Transactional Outbox', ru: 'Транзакц. outbox',    diff: 'medium', pop: 3, tags: ['atomicity'], status: 'done' },
   ],
   resilience: [
     { name: 'Circuit Breaker',      ru: 'Предохранитель',      diff: 'medium', pop: 5, tags: ['fail-fast'], status: '' },
@@ -829,7 +829,251 @@ emailConsumer.handle(event);       // ok
 analyticsConsumer.handle(event);   // FAIL → исключение
 inventoryConsumer.handle(event);   // не вызван — цепочка оборвана`
 
+const SAGA_GOOD = `List<String> run(List<Step> steps) {
+  Deque<Step> done = new ArrayDeque<>();
+  for (Step s : steps) {
+    if (s.ok()) { done.push(s); }              // шаг прошёл
+    else {
+      while (!done.isEmpty())
+        compensate(done.pop());                // откат завершённых в обратном порядке
+      break;
+    }
+  }
+}
+// createOrder ✓, chargePayment ✓, reserveInventory ✗ → refund, cancel order`
+
+const SAGA_BAD = `// Шаги без компенсаций
+createOrder();        // ✓ закоммичен
+chargePayment();      // ✓ деньги списаны
+reserveInventory();   // ✗ нет товара → исключение
+// откатить createOrder и chargePayment нечем → рассинхрон`
+
+const CQRS_GOOD = `class WriteSide {                       // команды
+  void deposit(int amount) { balance += amount; }
+}
+class ReadSide {                        // запросы
+  void project(int balance) { view = "balance: " + balance; } // денормализация
+  String query() { return view; }       // быстрый read
+}
+
+write.deposit(100); read.project(write.balance());
+read.query();   // "balance: 150" из проекции`
+
+const CQRS_BAD = `// Одна модель: запрос пересчитывает по всему логу
+class Model {
+  List<Integer> deposits = new ArrayList<>();
+  void deposit(int a) { deposits.add(a); }
+  int query() {
+    int sum = 0;
+    for (int d : deposits) sum += d;   // O(n) на каждый запрос
+    return sum;
+  }
+}`
+
+const ES_GOOD = `class Account {
+  private final List<String> events = new ArrayList<>();   // append-only лог
+  void apply(String event) { events.add(event); }
+  int balanceAt(int version) {                              // свёртка событий
+    int b = 0;
+    for (int i = 0; i < version; i++) b += delta(events.get(i));
+    return b;
+  }
+}
+
+acc.apply("deposit 100"); acc.apply("withdraw 30"); acc.apply("deposit 50");
+acc.balance();        // 120 (свёртка)
+acc.balanceAt(2);     // 70  (replay в прошлое)`
+
+const ES_BAD = `// Хранится только текущее значение
+class Account {
+  private int balance = 0;
+  void deposit(int a)  { balance += a; }   // мутация на месте
+  void withdraw(int a) { balance -= a; }
+}
+// balance = 120, но "как пришли?" и "сколько было после 2 операций?" — не ответить`
+
+const OUTBOX_GOOD = `@Transactional
+void createOrder(Order o) {
+  db.insert(o);                       // бизнес-строка
+  db.insert(outbox("OrderCreated"));  // и сообщение — в ОДНОЙ транзакции
+}
+
+// отдельный relay:
+void poll() {
+  for (var msg : db.outbox()) broker.publish(msg); // at-least-once
+  db.clearOutbox();
+}`
+
+const OUTBOX_BAD = `// Dual write: две независимые записи
+db.save(order);          // COMMIT в БД
+// ←—— процесс падает здесь
+broker.publish(event);   // не выполнено → сообщение потеряно
+// в БД заказ есть, downstream о нём не узнает`
+
 export const DETAILS = {
+  saga: {
+    name: 'Saga',
+    ru: 'Сага',
+    intent: 'Поддерживает согласованность данных в распределённой транзакции через последовательность локальных шагов с компенсациями.',
+    aka: 'Сага',
+    motivation: [
+      'Операция охватывает несколько сервисов (заказ, оплата, склад), а распределённой ACID-транзакции (2PC) нет или она дорогая. Если поздний шаг падает, ранние уже закоммичены — рассинхрон.',
+      'Сага выполняет шаги по очереди и при сбое запускает компенсирующие действия для уже завершённых шагов в обратном порядке, возвращая систему в согласованное состояние.',
+    ],
+    pros: [
+      'Согласованность без распределённой блокировки (2PC)',
+      'Каждый шаг — локальная транзакция своего сервиса',
+      'Явные компенсации описывают откат',
+    ],
+    cons: [
+      'Только eventual consistency (нет изоляции)',
+      'Компенсации сложно проектировать и тестировать',
+    ],
+    useCases: [
+      { src: 'Axon', item: 'Saga в event-driven системах' },
+      { src: 'Camunda', item: 'оркестрация саги/процесса' },
+      { src: 'Order', item: 'оформление заказа через сервисы' },
+    ],
+    related: [
+      { name: 'Publish-Subscribe', id: 'publish-subscribe', kind: 'comm', why: 'хореографическая сага на событиях' },
+      { name: 'Command', id: 'command', kind: 'behav', why: 'шаг + компенсация как execute/undo' },
+      { name: 'Transactional Outbox', id: 'transactional-outbox', kind: 'data', why: 'надёжная публикация событий саги' },
+    ],
+    code: { good: SAGA_GOOD, bad: SAGA_BAD },
+    viz: 'saga',
+    live: 'saga',
+    backend: '/patterns/microservices/data/saga',
+    preview: {
+      instances: [
+        { hash: 'createOrder', createdBy: 'compensated' },
+        { hash: 'chargePayment', createdBy: 'compensated' },
+        { hash: 'reserveInventory', createdBy: 'failed' },
+      ],
+      frame: { actor: 'chargePayment', action: 'compensate', result: '↩ refund (деньги возвращены)', ok: true },
+    },
+  },
+  cqrs: {
+    name: 'CQRS',
+    ru: 'CQRS',
+    intent: 'Разделяет модели команд (запись) и запросов (чтение), позволяя оптимизировать и масштабировать их независимо.',
+    aka: 'Command Query Responsibility Segregation',
+    motivation: [
+      'Когда чтение и запись делят одну модель, сложные запросы конкурируют с командами за блокировки и тормозят; одна схема не оптимальна и для того, и для другого.',
+      'CQRS разносит стороны: команды меняют write-модель и обновляют денормализованную read-проекцию, а запросы читают готовую проекцию — быстро и без конкуренции.',
+    ],
+    pros: [
+      'Чтение и запись оптимизируются/масштабируются отдельно',
+      'Денормализованные проекции под конкретные запросы',
+      'Меньше конкуренции за блокировки',
+    ],
+    cons: [
+      'Сложнее: две модели и синхронизация проекций',
+      'Eventual consistency между write и read',
+    ],
+    useCases: [
+      { src: 'Axon', item: 'CQRS + Event Sourcing' },
+      { src: 'Search', item: 'read-модель в Elasticsearch' },
+      { src: 'Reporting', item: 'отдельные read-реплики' },
+    ],
+    related: [
+      { name: 'Event Sourcing', id: 'event-sourcing', kind: 'data', why: 'события источника строят read-проекции' },
+      { name: 'Observer', id: 'observer', kind: 'behav', why: 'проекции обновляются по событиям' },
+      { name: 'Saga', id: 'saga', kind: 'data', why: 'часто работают в паре через события' },
+    ],
+    code: { good: CQRS_GOOD, bad: CQRS_BAD },
+    viz: 'cqrs',
+    live: 'cqrs',
+    backend: '/patterns/microservices/data/cqrs',
+    preview: {
+      instances: [
+        { hash: 'WriteSide', createdBy: 'commands' },
+        { hash: 'ReadSide', createdBy: 'queries' },
+      ],
+      frame: { actor: 'ReadSide', action: 'query', result: 'balance: 150 (из проекции)', ok: true },
+    },
+  },
+  'event-sourcing': {
+    name: 'Event Sourcing',
+    ru: 'Источник событий',
+    intent: 'Хранит состояние как append-only последовательность событий; текущее состояние получается их свёрткой.',
+    aka: 'Источник событий',
+    motivation: [
+      'Если хранить только текущее значение и мутировать его на месте, история теряется: нельзя провести аудит, восстановить состояние на момент в прошлом или перепроиграть события.',
+      'Event Sourcing делает источником истины лог событий. Состояние выводится свёрткой, а лог даёт аудит, replay и построение любых проекций.',
+    ],
+    pros: [
+      'Полный аудит и история изменений',
+      'Replay и восстановление состояния на любой момент',
+      'Из лога строятся любые проекции (с CQRS)',
+    ],
+    cons: [
+      'Сложнее: версионирование событий, снапшоты',
+      'Запросы требуют проекций (свёртка дорога)',
+    ],
+    useCases: [
+      { src: 'Kafka', item: 'лог как источник истины' },
+      { src: 'Banking', item: 'журнал транзакций (ledger)' },
+      { src: 'Axon', item: 'event store' },
+    ],
+    related: [
+      { name: 'CQRS', id: 'cqrs', kind: 'data', why: 'проекции чтения из событий' },
+      { name: 'Memento', id: 'memento', kind: 'behav', why: 'снапшоты состояния для ускорения' },
+      { name: 'Saga', id: 'saga', kind: 'data', why: 'саги реагируют на доменные события' },
+    ],
+    code: { good: ES_GOOD, bad: ES_BAD },
+    viz: 'event-sourcing',
+    live: 'event-sourcing',
+    backend: '/patterns/microservices/data/event-sourcing',
+    preview: {
+      instances: [
+        { hash: 'deposit 100', createdBy: '+100' },
+        { hash: 'withdraw 30', createdBy: '-30' },
+        { hash: 'deposit 50', createdBy: '+50' },
+      ],
+      frame: { actor: 'deposit 50', action: 'append', result: 'Σ = 120', ok: true, reveal: 3 },
+    },
+  },
+  'transactional-outbox': {
+    name: 'Transactional Outbox',
+    ru: 'Транзакционный outbox',
+    intent: 'Гарантирует атомарность изменения данных и отправки сообщения, записывая их в одну транзакцию БД и публикуя из outbox отдельным relay.',
+    aka: 'Transactional Outbox',
+    motivation: [
+      'Dual write (сначала commit в БД, потом publish в брокер) не атомарен: падение между шагами оставляет данные без сообщения (или наоборот) — системы рассинхронизируются.',
+      'Outbox пишет бизнес-строку и сообщение в одной транзакции БД, а отдельный relay позже читает outbox и публикует (at-least-once). Потерять сообщение нельзя.',
+    ],
+    pros: [
+      'Атомарность данных и сообщения (одна транзакция)',
+      'At-least-once доставка без dual write',
+      'Переживает падения между шагами',
+    ],
+    cons: [
+      'Нужен relay (polling/CDC) и дедупликация',
+      'Доставка at-least-once → возможны дубли',
+    ],
+    useCases: [
+      { src: 'Debezium', item: 'CDC из outbox-таблицы' },
+      { src: 'Spring', item: 'Spring Modulith event publication' },
+      { src: 'Kafka', item: 'outbox → топик' },
+    ],
+    related: [
+      { name: 'Saga', id: 'saga', kind: 'data', why: 'надёжно публикует события шагов саги' },
+      { name: 'Publish-Subscribe', id: 'publish-subscribe', kind: 'comm', why: 'relay публикует в брокер' },
+      { name: 'Event Sourcing', id: 'event-sourcing', kind: 'data', why: 'события как источник публикаций' },
+    ],
+    code: { good: OUTBOX_GOOD, bad: OUTBOX_BAD },
+    viz: 'transactional-outbox',
+    live: 'transactional-outbox',
+    backend: '/patterns/microservices/data/transactional-outbox',
+    preview: {
+      instances: [
+        { hash: 'DB+Outbox', createdBy: 'one tx' },
+        { hash: 'Relay', createdBy: 'poll' },
+        { hash: 'Broker', createdBy: 'published' },
+      ],
+      frame: { actor: 'Relay', action: 'poll → publish', result: 'Broker получил [OrderCreated]', ok: true },
+    },
+  },
   'service-discovery': {
     name: 'Service Discovery',
     ru: 'Обнаружение сервисов',
