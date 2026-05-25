@@ -91,8 +91,12 @@ export function Crumbs({ items }) {
 }
 
 // Pattern category stripe
+const KIND_BG = {
+  creat: 'var(--accent)', struct: 'var(--accent-2)', behav: 'var(--accent-3)',
+  decomp: 'var(--accent)', comm: 'var(--accent-2)', data: 'var(--accent-3)', resil: 'var(--accent-4)',
+}
 export function CatStripe({ kind = 'creat', label, count }) {
-  const bg = kind === 'creat' ? 'var(--accent)' : kind === 'struct' ? 'var(--accent-2)' : 'var(--accent-3)'
+  const bg = KIND_BG[kind] || 'var(--accent)'
   return (
     <div className="between" style={{ background: bg, color: 'var(--paper)', padding: '6px 10px', borderBottom: 'var(--px) solid var(--line)' }}>
       <span className="upper small">{label}</span>
@@ -119,5 +123,11 @@ export function DiffPill({ diff }) {
   return <span className="pix-tag" style={{ background: s.bg, color: 'var(--paper)' }}>{s.label}</span>
 }
 
-export const CAT_COLOR = { creational: 'var(--accent)', structural: 'var(--accent-2)', behavioral: 'var(--accent-3)' }
-export const CAT_KIND = { creational: 'creat', structural: 'struct', behavioral: 'behav' }
+export const CAT_COLOR = {
+  creational: 'var(--accent)', structural: 'var(--accent-2)', behavioral: 'var(--accent-3)',
+  decomposition: 'var(--accent)', communication: 'var(--accent-2)', data: 'var(--accent-3)', resilience: 'var(--accent-4)',
+}
+export const CAT_KIND = {
+  creational: 'creat', structural: 'struct', behavioral: 'behav',
+  decomposition: 'decomp', communication: 'comm', data: 'data', resilience: 'resil',
+}

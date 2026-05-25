@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate, Navigate } from 'react-router-dom'
 import { AppTopBar, Crumbs, PixelIcon, Stars, DiffPill, CAT_COLOR } from '../components/Pixel.jsx'
-import { getCategory, getCategoryPatterns, doneCount, getDetail } from '../data/patterns.js'
+import { getCategory, getSection, getCategoryPatterns, doneCount, getDetail } from '../data/patterns.js'
 
 function PatternArt({ name, cell = 12, color = 'var(--accent-3)' }) {
   return (
@@ -15,9 +15,10 @@ function PatternArt({ name, cell = 12, color = 'var(--accent-3)' }) {
 }
 
 export default function PatternList() {
-  const { category } = useParams()
+  const { section, category } = useParams()
   const navigate = useNavigate()
   const cat = getCategory(category)
+  const meta = getSection(section)
   const patterns = getCategoryPatterns(category)
   const [hovered, setHovered] = useState(patterns[0]?.id || null)
 
@@ -32,12 +33,12 @@ export default function PatternList() {
       <AppTopBar active="Patterns" />
       <Crumbs items={[
         { label: 'Patterns', to: '/' },
-        { label: 'Design', to: '/patterns/design' },
+        { label: meta?.title || 'Patterns', to: `/patterns/${section}` },
         { label: cat.label, active: true },
       ]} />
 
       <div className="between p-12" style={{ borderBottom: 'var(--px) solid var(--line)', background: 'var(--paper)' }}>
-        <span className="row gap-8 clickable" style={{ alignItems: 'center' }} onClick={() => navigate('/patterns/design')}>
+        <span className="row gap-8 clickable" style={{ alignItems: 'center' }} onClick={() => navigate(`/patterns/${section}`)}>
           <PixelIcon kind="chev" size={12} /> <span className="pix-display" style={{ fontSize: 12 }}>CATEGORIES</span>
         </span>
         <span className="pix-display" style={{ fontSize: 14 }}>{cat.label.toUpperCase()} · {patterns.length}/{cat.count}</span>
@@ -51,7 +52,7 @@ export default function PatternList() {
               <div key={p.id} className="pix-frame pix-frame--hover col clickable"
                    style={{ position: 'relative' }}
                    onMouseEnter={() => setHovered(p.id)}
-                   onClick={() => navigate(`/patterns/design/${category}/${p.id}`)}>
+                   onClick={() => navigate(`/patterns/${section}/${category}/${p.id}`)}>
                 <div className="pix-display" style={{ position: 'absolute', top: 6, left: 8, fontSize: 11, color: 'var(--ink-3)', zIndex: 1 }}>
                   №{String(p.number).padStart(2, '0')}
                 </div>
@@ -87,7 +88,7 @@ export default function PatternList() {
               </div>
               <div className="small">{detail?.intent || `${open.ru} — ${cat.label.toLowerCase()} pattern.`}</div>
               <button className="pix-btn pix-btn--primary" style={{ background: color }}
-                      onClick={() => navigate(`/patterns/design/${category}/${open.id}`)}>
+                      onClick={() => navigate(`/patterns/${section}/${category}/${open.id}`)}>
                 Open pattern →
               </button>
             </div>
