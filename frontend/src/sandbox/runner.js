@@ -133,6 +133,47 @@ export function buildChainRun(resp, flavor) {
   }
 }
 
+// Generic builder: patterns whose viz reads steps/instances uniformly.
+// Each frame carries the raw Step fields so a bespoke viz can map step → highlight.
+export function buildRun(resp, flavor, vizKind) {
+  const steps = resp.steps || []
+  const instances = resp.instances || []
+  const lastT = steps.length ? steps[steps.length - 1].t : 0
+
+  const frames = steps.map((s, i) => ({
+    codeLine: -1, idx: i,
+    actor: s.actor, action: s.action, result: s.result, ok: s.ok,
+    reveal: i + 1,
+    label: `${s.actor} · ${s.action} → ${s.result}`,
+  }))
+
+  const stdout = [
+    { line: `GET /api${resp.__path || '/...'}/${flavor}`, c: 'var(--ink-3)' },
+    { line: `→ 200 OK · ${lastT}ms`, c: 'var(--good)' },
+    { line: '', c: '' },
+    { line: '[trace]', c: 'var(--ink-3)' },
+    ...steps.map(s => ({ line: `${s.actor}  ${s.action}  →  ${s.result}`, c: s.ok ? '' : 'var(--bad)' })),
+    { line: '', c: '' },
+    { line: resp.verdict || '', c: (resp.verdict || '').startsWith('PASS') ? 'var(--good)' : 'var(--bad)' },
+    { line: resp.explanation || '', c: 'var(--ink-2)' },
+  ]
+
+  return {
+    status: 'ok', durationMs: lastT,
+    fileName: (resp.pattern || 'Pattern').replace(/[^A-Za-z]/g, '') + '.java',
+    code: resp.code || '', vizKind, instances, broken: flavor === 'bad',
+    frames: frames.length ? frames : [{ codeLine: -1, idx: 0, reveal: instances.length, label: 'run', ok: true }],
+    stdout,
+  }
+}
+
+// Picks the right builder for a viz kind (bespoke ones keep their own builder).
+export function buildFor(vizKind, resp, flavor) {
+  if (vizKind === 'chain') return buildChainRun(resp, flavor)
+  if (vizKind === 'singleton') return buildLiveRun(resp, flavor)
+  return buildRun(resp, flavor, vizKind)
+}
+
 export function errorRun(message, flavor, patternId) {
   return {
     status: 'error', durationMs: 0, fileName: `${patternId}.java`, code: '',

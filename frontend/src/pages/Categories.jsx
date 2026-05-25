@@ -1,21 +1,28 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { AppTopBar, Crumbs, CatStripe, PixelIcon } from '../components/Pixel.jsx'
-import { CATEGORIES, getCategoryPatterns } from '../data/patterns.js'
+import { useParams, useNavigate, Navigate } from 'react-router-dom'
+import { AppTopBar, Crumbs, CatStripe, PixelIcon, CAT_COLOR } from '../components/Pixel.jsx'
+import { getSectionCategories, getSection, getCategoryPatterns } from '../data/patterns.js'
 
 export default function Categories() {
+  const { section } = useParams()
   const navigate = useNavigate()
-  const [expanded, setExpanded] = useState('creational')
+  const cats = getSectionCategories(section)
+  const meta = getSection(section)
+  const [expanded, setExpanded] = useState(cats[0]?.id || null)
+
+  if (!cats.length) return <Navigate to="/patterns/design" replace />
+
+  const total = cats.reduce((n, c) => n + c.count, 0)
 
   return (
     <div className="screen">
       <AppTopBar active="Patterns" />
-      <Crumbs items={[{ label: 'Patterns', to: '/' }, { label: 'Design Patterns', active: true }]} />
+      <Crumbs items={[{ label: 'Patterns', to: '/' }, { label: meta?.title || 'Patterns', active: true }]} />
       <div className="screen__body p-20 gap-16 scroll-y maxw">
         <div className="between gap-12 wrap">
           <div className="col gap-4">
-            <div className="bold" style={{ fontSize: 26 }}>Design Patterns · GoF</div>
-            <div className="small text-muted">23 паттерна в 3 категориях. Кликни категорию — раскроется список.</div>
+            <div className="bold" style={{ fontSize: 26 }}>{meta?.title || 'Patterns'} · {meta?.sub || ''}</div>
+            <div className="small text-muted">{total} паттернов в {cats.length} категориях. Кликни категорию — раскроется список.</div>
           </div>
           <div className="row gap-8">
             <button className="pix-btn"><PixelIcon kind="search" size={14} /> Filter</button>
@@ -24,13 +31,13 @@ export default function Categories() {
         </div>
 
         <div className="row gap-20 resp-stack" style={{ alignItems: 'stretch' }}>
-          {CATEGORIES.map((c) => {
+          {cats.map((c) => {
             const open = expanded === c.id
-            const bg = c.kind === 'creat' ? 'var(--accent)' : c.kind === 'struct' ? 'var(--accent-2)' : 'var(--accent-3)'
+            const bg = CAT_COLOR[c.id] || 'var(--accent)'
             const patterns = getCategoryPatterns(c.id)
             return (
               <div key={c.id} className="pix-frame col" style={{ flex: 1 }}>
-                <div className="clickable" onClick={() => navigate(`/patterns/design/${c.id}`)}>
+                <div className="clickable" onClick={() => navigate(`/patterns/${section}/${c.id}`)}>
                   <CatStripe kind={c.kind} label={`${c.label} · ${c.ru}`} count={`${c.count} patterns`} />
                 </div>
                 <div className="p-16 col gap-12 f1">
@@ -48,7 +55,7 @@ export default function Categories() {
                         {patterns.map(p => (
                           <div key={p.id} className="between pix-frame pix-frame--flat clickable"
                                style={{ padding: '6px 10px', background: 'var(--bg-2)' }}
-                               onClick={() => navigate(`/patterns/design/${c.id}/${p.id}`)}>
+                               onClick={() => navigate(`/patterns/${section}/${c.id}/${p.id}`)}>
                             <span>{p.name}</span>
                             <PixelIcon kind="chev" size={14} color="var(--ink-3)" />
                           </div>
@@ -61,9 +68,9 @@ export default function Categories() {
                       <div className="row gap-6 wrap">
                         {patterns.slice(0, 4).map(p => (
                           <span key={p.id} className="pix-tag clickable"
-                                onClick={() => navigate(`/patterns/design/${c.id}/${p.id}`)}>{p.name}</span>
+                                onClick={() => navigate(`/patterns/${section}/${c.id}/${p.id}`)}>{p.name}</span>
                         ))}
-                        <span className="pix-tag">+{patterns.length - 4}</span>
+                        {patterns.length > 4 && <span className="pix-tag">+{patterns.length - 4}</span>}
                       </div>
                     </div>
                   )}
@@ -74,7 +81,7 @@ export default function Categories() {
                       {open ? 'Свернуть' : 'Раскрыть'} <PixelIcon kind="chev" size={12} />
                     </button>
                     <button className="pix-btn pix-btn--primary" style={{ background: bg }}
-                            onClick={() => navigate(`/patterns/design/${c.id}`)}>
+                            onClick={() => navigate(`/patterns/${section}/${c.id}`)}>
                       Open →
                     </button>
                   </div>

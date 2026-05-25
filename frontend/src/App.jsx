@@ -11,14 +11,10 @@ export default function App() {
     <Routes>
       <Route path="/" element={<SectionPick />} />
       <Route path="/patterns" element={<Navigate to="/patterns/design" replace />} />
-      <Route path="/patterns/design" element={<Categories />} />
-      <Route path="/patterns/design/:category" element={<PatternList />} />
-      <Route path="/patterns/design/:category/:patternId" element={<PatternDetail />} />
-      <Route path="/patterns/design/:category/:patternId/sandbox" element={<Sandbox />} />
-      <Route
-        path="/patterns/microservices"
-        element={<ComingSoon title="Microservices · скоро" sub="Каталог микросервисных паттернов в работе. Пока доступны Design Patterns." />}
-      />
+      <Route path="/patterns/:section" element={<Categories />} />
+      <Route path="/patterns/:section/:category" element={<PatternList />} />
+      <Route path="/patterns/:section/:category/:patternId" element={<PatternDetail />} />
+      <Route path="/patterns/:section/:category/:patternId/sandbox" element={<Sandbox />} />
       <Route path="*" element={<ComingSoon title="404" sub="Такой страницы нет." />} />
     </Routes>
   )

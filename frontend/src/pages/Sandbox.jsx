@@ -2,15 +2,15 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate, Navigate } from 'react-router-dom'
 import { AppTopBar, Crumbs, PixelIcon, CAT_COLOR } from '../components/Pixel.jsx'
 import { CodeLines } from '../components/CodeView.jsx'
-import { ObserverViz, SingletonViz, ChainViz } from '../components/Diagrams.jsx'
+import { renderViz } from '../components/Diagrams.jsx'
 import { findPattern, getCategory, getDetail } from '../data/patterns.js'
 import { api } from '../api/patterns.js'
-import { buildObserverRun, buildLiveRun, buildChainRun, errorRun } from '../sandbox/runner.js'
+import { buildObserverRun, buildFor, errorRun } from '../sandbox/runner.js'
 
 const PLAY_MS = 600
 
 export default function Sandbox() {
-  const { category, patternId } = useParams()
+  const { section, category, patternId } = useParams()
   const navigate = useNavigate()
   const cat = getCategory(category)
   const pattern = findPattern(category, patternId)
@@ -35,8 +35,7 @@ export default function Sandbox() {
     if (isLive) {
       try {
         const resp = await api.run(patternId, fl)
-        const build = detail?.viz === 'chain' ? buildChainRun : buildLiveRun
-        setResult(build(resp, fl))
+        setResult(buildFor(detail.viz, resp, fl))
         setRunState('done')
       } catch (e) {
         setResult(errorRun(e.message, fl, patternId))
@@ -76,7 +75,7 @@ export default function Sandbox() {
     <div className="screen">
       <AppTopBar active="Sandbox" compact />
       <Crumbs items={[
-        { label: pattern.name, to: `/patterns/design/${category}/${patternId}` },
+        { label: pattern.name, to: `/patterns/${section}/${category}/${patternId}` },
         { label: 'Sandbox · Run', active: true },
       ]} />
 
@@ -144,11 +143,7 @@ export default function Sandbox() {
 
             <div className="f1 p-16" style={{ background: 'var(--bg-2)' }}>
               <div className="pix-frame pix-grid" style={{ height: '100%', minHeight: 220, padding: 10 }}>
-                {result?.vizKind === 'observer'
-                  ? <ObserverViz step={frame?.viz ?? 0} label={cmd} />
-                  : result?.vizKind === 'chain'
-                  ? <ChainViz handlers={result?.handlers || []} activeIndex={frame?.activeIndex ?? -1} decision={frame?.decision || 'enter'} broken={result?.broken} />
-                  : <SingletonViz instances={result?.instances || []} revealed={frame?.viz ?? 0} broken={result?.broken} />}
+                {renderViz(result?.vizKind, { result, frame, step, cmd })}
               </div>
             </div>
 

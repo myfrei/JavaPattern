@@ -2,15 +2,16 @@ import { useState } from 'react'
 import { useParams, useNavigate, Navigate } from 'react-router-dom'
 import { AppTopBar, Crumbs, PixelIcon, Stars, DiffPill, CAT_COLOR } from '../components/Pixel.jsx'
 import { CodeBlock } from '../components/CodeView.jsx'
-import { MiniUML, ObserverViz, ChainViz } from '../components/Diagrams.jsx'
-import { getCategory, getCategoryPatterns, findPattern, getDetail } from '../data/patterns.js'
+import { MiniUML, ObserverViz, ChainViz, renderViz } from '../components/Diagrams.jsx'
+import { getCategory, getSection, getCategoryPatterns, findPattern, findPatternAnywhere, getDetail } from '../data/patterns.js'
 
 const TABS = ['Theory', 'UML', 'Code', 'Visualization', 'Use cases', 'Pros / Cons', 'Related']
 
 export default function PatternDetail() {
-  const { category, patternId } = useParams()
+  const { section, category, patternId } = useParams()
   const navigate = useNavigate()
   const cat = getCategory(category)
+  const meta = getSection(section)
   const pattern = findPattern(category, patternId)
   const detail = getDetail(patternId)
   const [tab, setTab] = useState('Code')
@@ -20,7 +21,7 @@ export default function PatternDetail() {
   if (!cat || !pattern) return <Navigate to="/patterns/design" replace />
 
   const color = CAT_COLOR[category]
-  const sandbox = `/patterns/design/${category}/${patternId}/sandbox`
+  const sandbox = `/patterns/${section}/${category}/${patternId}/sandbox`
   const code = detail?.code?.[flavor]
 
   const copyCode = () => { if (code) navigator.clipboard?.writeText(code) }
@@ -30,8 +31,8 @@ export default function PatternDetail() {
       <AppTopBar active="Patterns" />
       <Crumbs items={[
         { label: 'Patterns', to: '/' },
-        { label: 'Design', to: '/patterns/design' },
-        { label: cat.label, to: `/patterns/design/${category}` },
+        { label: meta?.title || 'Patterns', to: `/patterns/${section}` },
+        { label: cat.label, to: `/patterns/${section}/${category}` },
         { label: pattern.name, active: true },
       ]} />
 
@@ -45,7 +46,7 @@ export default function PatternDetail() {
               return (
                 <div key={p.id} className="between clickable"
                      style={{ padding: '6px 8px', fontSize: 15, background: sel ? color : 'transparent', color: sel ? 'var(--paper)' : 'var(--ink)' }}
-                     onClick={() => navigate(`/patterns/design/${category}/${p.id}`)}>
+                     onClick={() => navigate(`/patterns/${section}/${category}/${p.id}`)}>
                   <span>{p.name}</span>
                   {sel && <PixelIcon kind="chev" size={12} color="var(--paper)" />}
                 </div>
@@ -107,16 +108,21 @@ export default function PatternDetail() {
               {detail?.related && (
                 <div className="pix-frame p-12 col gap-8">
                   <div className="tiny upper text-muted">related</div>
-                  {detail.related.map(r => (
-                    <div key={r.id} className="between clickable" style={{ padding: '4px 0', borderBottom: '1px dashed var(--line)' }}
-                         onClick={() => navigate(`/patterns/design/${r.kind === 'creat' ? 'creational' : r.kind === 'struct' ? 'structural' : 'behavioral'}/${r.id}`)}>
-                      <span className="row gap-6" style={{ alignItems: 'center' }}>
-                        <span style={{ width: 8, height: 8, background: r.kind === 'creat' ? 'var(--accent)' : r.kind === 'struct' ? 'var(--accent-2)' : 'var(--accent-3)' }} />
-                        <span>{r.name}</span>
-                      </span>
-                      <span className="tiny text-muted">{r.why}</span>
-                    </div>
-                  ))}
+                  {detail.related.map(r => {
+                    const tgt = findPatternAnywhere(r.id)
+                    const tcat = tgt ? getCategory(tgt.category) : null
+                    const to = tcat ? `/patterns/${tcat.section}/${tcat.id}/${r.id}` : null
+                    return (
+                      <div key={r.id} className="between clickable" style={{ padding: '4px 0', borderBottom: '1px dashed var(--line)' }}
+                           onClick={() => to && navigate(to)}>
+                        <span className="row gap-6" style={{ alignItems: 'center' }}>
+                          <span style={{ width: 8, height: 8, background: r.kind === 'creat' ? 'var(--accent)' : r.kind === 'struct' ? 'var(--accent-2)' : 'var(--accent-3)' }} />
+                          <span>{r.name}</span>
+                        </span>
+                        <span className="tiny text-muted">{r.why}</span>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </div>
@@ -178,6 +184,8 @@ function TabContent({ tab, detail, pattern, cat, color, flavor, setFlavor, code,
             ? <ObserverViz step={3} label="preview · клик откроет полный sandbox" />
             : detail?.viz === 'chain'
             ? <ChainViz handlers={detail.previewHandlers || []} activeIndex={2} decision="approve" />
+            : detail?.preview
+            ? renderViz(detail.viz, { result: { instances: detail.preview.instances || [], broken: false }, frame: detail.preview.frame || null, step: 0 })
             : <div className="center text-muted" style={{ height: '100%' }}>Интерактивная визуализация — в sandbox</div>}
         </div>
         <button className="pix-btn pix-btn--primary" style={{ background: color, alignSelf: 'flex-start' }} onClick={onRun}>
