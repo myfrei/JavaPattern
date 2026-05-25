@@ -1118,6 +1118,121 @@ export function OutboxViz({ result, frame }) {
   )
 }
 
+// Circuit Breaker — state machine CLOSED/OPEN/HALF_OPEN (good) vs no breaker (bad).
+export function CircuitBreakerViz({ result, frame }) {
+  const instances = result?.instances || []
+  const broken = result?.broken
+  const activeName = frame?.actor
+  if (broken) {
+    const d = instances[0]
+    return (
+      <div className="col gap-10 center" style={{ height: '100%', justifyContent: 'center' }}>
+        <div className="tiny upper text-muted">no breaker · every call hits</div>
+        <VizBox title={d?.hash || 'Downstream'} sub="failing · timeouts" active bad minWidth={190} />
+        <VizStatus text={frame ? `${frame.action} → ${frame.result}` : 'каскад таймаутов'} color="var(--bad)" />
+      </div>
+    )
+  }
+  return (
+    <div className="col gap-12 center" style={{ height: '100%', justifyContent: 'center' }}>
+      <div className="tiny upper text-muted">circuit breaker · state machine</div>
+      <div className="row gap-4 center wrap" style={{ alignItems: 'center' }}>
+        {instances.map((s, i) => (
+          <Fragment key={i}>
+            {i > 0 && <span style={{ color: 'var(--accent-3)' }}>→</span>}
+            <VizBox title={s.hash} sub="state" active={s.hash === activeName} minWidth={110} />
+          </Fragment>
+        ))}
+      </div>
+      <VizStatus text={frame ? `${frame.action} → ${frame.result}` : 'OPEN → fast-fail, HALF_OPEN → проба'} color={stepTone(frame)} />
+    </div>
+  )
+}
+
+// Retry — attempts with growing backoff (good) vs single attempt (bad).
+export function RetryViz({ result, frame }) {
+  const instances = result?.instances || []
+  const broken = result?.broken
+  const activeName = frame?.actor
+  return (
+    <div className="col gap-10 center" style={{ height: '100%', justifyContent: 'center' }}>
+      <div className="tiny upper text-muted">{broken ? 'no retry · transient fails' : 'retry with exponential backoff'}</div>
+      <div className="row gap-3 center wrap" style={{ alignItems: 'center' }}>
+        {instances.map((a, i) => {
+          const ok = /ok/i.test(a.createdBy)
+          const active = a.hash === activeName
+          const bg = active ? 'var(--accent-3)' : ok ? 'var(--good)' : 'var(--bad)'
+          return (
+            <Fragment key={i}>
+              {i > 0 && <span className="tiny text-muted">⟳</span>}
+              <div className="pix-frame col center" style={{ minWidth: 110, padding: '8px 10px', gap: 2, background: bg, color: 'var(--paper)', border: 'var(--px) solid var(--line)' }}>
+                <span className="small bold" style={{ color: 'var(--paper)' }}>{a.hash}</span>
+                <span className="tiny" style={{ color: 'var(--paper)' }}>{a.createdBy}</span>
+              </div>
+            </Fragment>
+          )
+        })}
+      </div>
+      <VizStatus text={frame ? `${frame.action} → ${frame.result}` : (broken ? 'транзиентный сбой роняет запрос' : 'паузы растут: 0 → 100 → 200ms')}
+                 color={broken ? 'var(--bad)' : stepTone(frame)} />
+    </div>
+  )
+}
+
+// Bulkhead — isolated pools (good) vs one shared pool starvation (bad).
+export function BulkheadViz({ result, frame }) {
+  const instances = result?.instances || []
+  const broken = result?.broken
+  const activeName = frame?.actor
+  return (
+    <div className="col gap-10 center" style={{ height: '100%', justifyContent: 'center' }}>
+      <div className="tiny upper text-muted">{broken ? 'shared pool · starvation' : 'isolated pools (bulkheads)'}</div>
+      <div className="row gap-12 wrap center" style={{ maxWidth: 480 }}>
+        {instances.map((p, i) => {
+          const full = /full|reject/i.test(p.createdBy)
+          const active = p.hash === activeName
+          const bg = active ? 'var(--accent-3)' : broken ? 'var(--bad)' : full ? 'var(--accent-2)' : 'var(--good)'
+          return (
+            <div key={i} className="pix-frame col center" style={{ minWidth: 160, padding: '10px 12px', gap: 2, background: bg, color: 'var(--paper)', border: 'var(--px) solid var(--line)' }}>
+              <span className="small bold" style={{ color: 'var(--paper)' }}>{p.hash}</span>
+              <span className="tiny" style={{ color: 'var(--paper)' }}>{p.createdBy}</span>
+            </div>
+          )
+        })}
+      </div>
+      <VizStatus text={frame ? `${frame.action} → ${frame.result}` : (broken ? 'медленная зависимость исчерпала пул' : 'насыщение одной не задевает другие')}
+                 color={broken ? 'var(--bad)' : stepTone(frame)} />
+    </div>
+  )
+}
+
+// Rate Limiter — token bucket allows N, rejects excess (good) vs no limit (bad).
+export function RateLimiterViz({ result, frame }) {
+  const instances = result?.instances || []
+  const broken = result?.broken
+  const activeName = frame?.actor
+  return (
+    <div className="col gap-10 center" style={{ height: '100%', justifyContent: 'center' }}>
+      <div className="tiny upper text-muted">{broken ? 'no limit · overload' : 'token bucket · 3/window'}</div>
+      <div className="row gap-3 center wrap" style={{ maxWidth: 480 }}>
+        {instances.map((q, i) => {
+          const allowed = /allowed/i.test(q.createdBy)
+          const active = q.hash === activeName
+          const bg = active ? 'var(--accent-3)' : broken ? 'var(--bad)' : allowed ? 'var(--good)' : 'var(--bad)'
+          return (
+            <div key={i} className="pix-frame col center" style={{ minWidth: 84, padding: '6px 8px', gap: 2, background: bg, color: 'var(--paper)', border: 'var(--px) solid var(--line)' }}>
+              <span className="small bold" style={{ color: 'var(--paper)' }}>{q.hash}</span>
+              <span className="tiny" style={{ color: 'var(--paper)' }}>{broken ? 'passed' : (allowed ? 'allowed' : '429')}</span>
+            </div>
+          )
+        })}
+      </div>
+      <VizStatus text={frame ? `${frame.action} → ${frame.result}` : (broken ? 'все запросы прошли — перегрузка' : 'лишние запросы → 429')}
+                 color={broken ? 'var(--bad)' : stepTone(frame)} />
+    </div>
+  )
+}
+
 // ─── Viz registry: kind → render fn (uniform props {result, frame, step, cmd}) ───
 export const VIZ = {
   observer: (p) => <ObserverLiveViz {...p} />,
@@ -1156,6 +1271,10 @@ export const VIZ = {
   cqrs: (p) => <CqrsViz {...p} />,
   'event-sourcing': (p) => <EventSourcingViz {...p} />,
   'transactional-outbox': (p) => <OutboxViz {...p} />,
+  'circuit-breaker': (p) => <CircuitBreakerViz {...p} />,
+  retry: (p) => <RetryViz {...p} />,
+  bulkhead: (p) => <BulkheadViz {...p} />,
+  'rate-limiter': (p) => <RateLimiterViz {...p} />,
 }
 
 export function renderViz(kind, props) {

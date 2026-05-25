@@ -52,7 +52,7 @@ export const CATEGORIES = [
 // number is assigned sequentially per category below.
 const RAW = {
   creational: [
-    { name: 'Singleton',        ru: 'Одиночка',            diff: 'easy',   pop: 5, tags: ['global', 'lazy-init'], status: 'in-progress', live: 'singleton' },
+    { name: 'Singleton',        ru: 'Одиночка',            diff: 'easy',   pop: 5, tags: ['global', 'lazy-init'], status: 'done', live: 'singleton' },
     { name: 'Factory Method',   ru: 'Фабричный метод',     diff: 'medium', pop: 5, tags: ['create', 'subclass'], status: 'done' },
     { name: 'Abstract Factory', ru: 'Абстрактная фабрика', diff: 'hard',   pop: 4, tags: ['family'], status: 'done' },
     { name: 'Builder',          ru: 'Строитель',           diff: 'easy',   pop: 4, tags: ['step-by-step'], status: 'done' },
@@ -97,10 +97,10 @@ const RAW = {
     { name: 'Transactional Outbox', ru: 'Транзакц. outbox',    diff: 'medium', pop: 3, tags: ['atomicity'], status: 'done' },
   ],
   resilience: [
-    { name: 'Circuit Breaker',      ru: 'Предохранитель',      diff: 'medium', pop: 5, tags: ['fail-fast'], status: '' },
-    { name: 'Retry',                ru: 'Повтор',              diff: 'easy',   pop: 5, tags: ['backoff'], status: '' },
-    { name: 'Bulkhead',             ru: 'Переборка',           diff: 'medium', pop: 3, tags: ['isolation'], status: '' },
-    { name: 'Rate Limiter',         ru: 'Ограничитель',        diff: 'medium', pop: 4, tags: ['throttle'], status: '' },
+    { name: 'Circuit Breaker',      ru: 'Предохранитель',      diff: 'medium', pop: 5, tags: ['fail-fast'], status: 'done' },
+    { name: 'Retry',                ru: 'Повтор',              diff: 'easy',   pop: 5, tags: ['backoff'], status: 'done' },
+    { name: 'Bulkhead',             ru: 'Переборка',           diff: 'medium', pop: 3, tags: ['isolation'], status: 'done' },
+    { name: 'Rate Limiter',         ru: 'Ограничитель',        diff: 'medium', pop: 4, tags: ['throttle'], status: 'done' },
   ],
 }
 
@@ -910,7 +910,223 @@ db.save(order);          // COMMIT в БД
 broker.publish(event);   // не выполнено → сообщение потеряно
 // в БД заказ есть, downstream о нём не узнает`
 
+const CB_GOOD = `String call(Downstream ds) {
+  if (state == OPEN) return "fast-fail";   // не трогаем упавший сервис
+  if (ds.call()) { failures = 0; state = CLOSED; return "ok"; }
+  if (++failures >= threshold) state = OPEN; // разомкнуть после N ошибок
+  return "fail";
+}
+// OPEN → (пауза) → HALF_OPEN → пробный вызов → CLOSED при успехе`
+
+const CB_BAD = `// Без брейкера: каждый вызов ждёт таймаут упавшего сервиса
+for (int i = 0; i < 5; i++) {
+  downstream.call();   // fail (таймаут) — поток висит
+}
+// зависшие вызовы копятся → каскадный отказ вызывающего сервиса`
+
+const RETRY_GOOD = `for (int n = 1; n <= maxAttempts; n++) {
+  long wait = (n == 1) ? 0 : 100L * (1L << (n - 2)); // 0,100,200,400…
+  sleep(wait);
+  if (service.call()) return SUCCESS;                // успех — выходим
+}
+// падает 2 раза, успех на 3-й попытке`
+
+const RETRY_BAD = `// Одна попытка, без повторов
+boolean ok = service.call();   // ✗ транзиентный сбой → запрос потерян
+// а 3-я попытка прошла бы.
+// обратная крайность: while(!ok) call();  // шторм без backoff`
+
+const BULKHEAD_GOOD = `Pool reportPool  = new Pool("reportPool", 2);   // отдельные отсеки
+Pool paymentPool = new Pool("paymentPool", 2);
+
+reportPool.acquire(); reportPool.acquire();      // report: 2/2 (full)
+reportPool.acquire();                            // reject — но только report
+paymentPool.acquire();                           // ok — payment изолирован`
+
+const BULKHEAD_BAD = `// Один общий пул на всё
+SharedPool pool = new SharedPool(4);
+for (int i = 0; i < 4; i++) pool.acquire();   // report занял все 4 слота
+pool.acquire();                                // payment → reject (голодает)`
+
+const RATELIMIT_GOOD = `class TokenBucket {
+  private int tokens = capacity;          // 3
+  boolean tryAcquire() {
+    if (tokens > 0) { tokens--; return true; }
+    return false;                          // 429 Too Many Requests
+  }
+}
+// 5 запросов при лимите 3 → 3 проходят, 2 получают 429`
+
+const RATELIMIT_BAD = `// Без лимита: принимаем всё подряд
+for (int i = 0; i < 5; i++) service.handle();   // load растёт без границ
+// всплеск проходит целиком → перегрузка/падение`
+
 export const DETAILS = {
+  'circuit-breaker': {
+    name: 'Circuit Breaker',
+    ru: 'Предохранитель',
+    intent: 'Размыкает вызовы к упавшей зависимости после серии ошибок и мгновенно отклоняет их, давая сервису восстановиться.',
+    aka: 'Предохранитель',
+    motivation: [
+      'Когда downstream падает, каждый вызов ждёт таймаут и держит поток. Под нагрузкой зависшие вызовы исчерпывают пулы и каскадом валят вызывающий сервис.',
+      'Брейкер считает ошибки: после порога переходит в OPEN и мгновенно отклоняет вызовы (fast-fail), не трогая упавший сервис. Через паузу пробует один вызов (HALF_OPEN) и закрывается при успехе.',
+    ],
+    pros: [
+      'Останавливает каскад таймаутов (fail-fast)',
+      'Даёт упавшей зависимости время восстановиться',
+      'Освобождает потоки и пулы вызывающего',
+    ],
+    cons: [
+      'Нужно настраивать пороги/таймауты',
+      'В OPEN часть валидных запросов тоже отклоняется',
+    ],
+    useCases: [
+      { src: 'Resilience4j', item: 'CircuitBreaker' },
+      { src: 'Netflix', item: 'Hystrix (legacy)' },
+      { src: 'Istio', item: 'outlier detection' },
+    ],
+    related: [
+      { name: 'Retry', id: 'retry', kind: 'resil', why: 'часто комбинируют: retry под брейкером' },
+      { name: 'Bulkhead', id: 'bulkhead', kind: 'resil', why: 'оба ограничивают радиус сбоя' },
+      { name: 'Proxy', id: 'proxy', kind: 'struct', why: 'брейкер — обёртка-заместитель вызова' },
+    ],
+    code: { good: CB_GOOD, bad: CB_BAD },
+    viz: 'circuit-breaker',
+    live: 'circuit-breaker',
+    backend: '/patterns/microservices/resilience/circuit-breaker',
+    preview: {
+      instances: [
+        { hash: 'CLOSED', createdBy: 'state' },
+        { hash: 'OPEN', createdBy: 'state' },
+        { hash: 'HALF_OPEN', createdBy: 'state' },
+      ],
+      frame: { actor: 'OPEN', action: 'call', result: 'fast-fail (downstream не вызван)', ok: true },
+    },
+  },
+  retry: {
+    name: 'Retry',
+    ru: 'Повтор',
+    intent: 'Повторяет неудавшийся вызов несколько раз с нарастающей паузой, чтобы пережить транзиентные сбои.',
+    aka: 'Повтор с backoff',
+    motivation: [
+      'Сеть и поды иногда «моргают»: одиночная транзиентная ошибка роняет запрос, хотя следующая попытка прошла бы. А повтор без пауз превращается в шторм, добивающий сервис.',
+      'Retry повторяет вызов с экспоненциальным backoff (и jitter), переживая временные сбои и не создавая лавины повторов.',
+    ],
+    pros: [
+      'Переживает транзиентные сбои незаметно для клиента',
+      'Экспоненциальный backoff + jitter гасят шторм',
+      'Просто добавить вокруг идемпотентного вызова',
+    ],
+    cons: [
+      'Только для идемпотентных операций',
+      'Повторы добавляют задержку; нужен предел попыток',
+    ],
+    useCases: [
+      { src: 'Resilience4j', item: 'Retry' },
+      { src: 'Spring', item: 'Spring Retry / @Retryable' },
+      { src: 'AWS SDK', item: 'exponential backoff с jitter' },
+    ],
+    related: [
+      { name: 'Circuit Breaker', id: 'circuit-breaker', kind: 'resil', why: 'брейкер обрывает бесполезные повторы' },
+      { name: 'Rate Limiter', id: 'rate-limiter', kind: 'resil', why: 'ограничивает интенсивность повторов' },
+      { name: 'Transactional Outbox', id: 'transactional-outbox', kind: 'data', why: 'надёжная доставка вместо повтора на лету' },
+    ],
+    code: { good: RETRY_GOOD, bad: RETRY_BAD },
+    viz: 'retry',
+    live: 'retry',
+    backend: '/patterns/microservices/resilience/retry',
+    preview: {
+      instances: [
+        { hash: 'attempt 1', createdBy: '0ms · fail' },
+        { hash: 'attempt 2', createdBy: '100ms · fail' },
+        { hash: 'attempt 3', createdBy: '200ms · ok' },
+      ],
+      frame: { actor: 'attempt 3', action: 'backoff 200ms → call', result: '✓ ok', ok: true },
+    },
+  },
+  bulkhead: {
+    name: 'Bulkhead',
+    ru: 'Переборка',
+    intent: 'Делит ресурсы на изолированные пулы, чтобы сбой или насыщение одной зависимости не топили остальные.',
+    aka: 'Переборка (как в корабле)',
+    motivation: [
+      'Один общий пул потоков/соединений на все зависимости опасен: медленная зависимость занимает все слоты, и не связанные с ней вызовы голодают — частичный сбой расползается на всё.',
+      'Bulkhead режет ресурсы на отсеки: у каждой зависимости свой пул. Насыщение одного отсека не затрагивает другие, ограничивая радиус поражения.',
+    ],
+    pros: [
+      'Изолирует сбой/насыщение зависимости',
+      'Гарантирует ресурсы критичным вызовам',
+      'Ограничивает радиус поражения',
+    ],
+    cons: [
+      'Ресурсы поделены — ниже пиковая утилизация',
+      'Нужно подбирать размеры отсеков',
+    ],
+    useCases: [
+      { src: 'Resilience4j', item: 'Bulkhead / ThreadPoolBulkhead' },
+      { src: 'Hystrix', item: 'изоляция по thread-pool' },
+      { src: 'K8s', item: 'resource limits на под' },
+    ],
+    related: [
+      { name: 'Circuit Breaker', id: 'circuit-breaker', kind: 'resil', why: 'оба ограничивают радиус сбоя' },
+      { name: 'Rate Limiter', id: 'rate-limiter', kind: 'resil', why: 'тоже ограничивает нагрузку' },
+      { name: 'Sidecar', id: 'sidecar', kind: 'comm', why: 'часто настраивается в сайдкаре/меше' },
+    ],
+    code: { good: BULKHEAD_GOOD, bad: BULKHEAD_BAD },
+    viz: 'bulkhead',
+    live: 'bulkhead',
+    backend: '/patterns/microservices/resilience/bulkhead',
+    preview: {
+      instances: [
+        { hash: 'paymentPool', createdBy: '1/2 · ok' },
+        { hash: 'reportPool', createdBy: '2/2 · full' },
+      ],
+      frame: { actor: 'paymentPool', action: 'payment acquire', result: 'ok (изолирован)', ok: true },
+    },
+  },
+  'rate-limiter': {
+    name: 'Rate Limiter',
+    ru: 'Ограничитель скорости',
+    intent: 'Ограничивает частоту запросов к сервису, отклоняя лишние, чтобы защитить его от перегрузки.',
+    aka: 'Throttling / Token Bucket',
+    motivation: [
+      'Без лимита любой всплеск трафика (или цикл повторов) проходит целиком и превышает ёмкость сервиса — деградация или падение под нагрузкой.',
+      'Rate Limiter (token bucket) выдаёт ограниченное число токенов на окно; запросы сверх лимита быстро отклоняются с 429, удерживая нагрузку на посильном уровне.',
+    ],
+    pros: [
+      'Защищает сервис от перегрузки и всплесков',
+      'Справедливое распределение ёмкости между клиентами',
+      'Дешёвый отказ (429) вместо деградации всех',
+    ],
+    cons: [
+      'Часть валидных запросов отклоняется',
+      'Нужны настройка лимитов и распределённый счётчик',
+    ],
+    useCases: [
+      { src: 'Resilience4j', item: 'RateLimiter' },
+      { src: 'Gateway', item: 'лимиты на API Gateway / nginx' },
+      { src: 'Bucket4j', item: 'token bucket для Java' },
+    ],
+    related: [
+      { name: 'Bulkhead', id: 'bulkhead', kind: 'resil', why: 'оба ограничивают нагрузку/ресурсы' },
+      { name: 'Circuit Breaker', id: 'circuit-breaker', kind: 'resil', why: 'дополняют друг друга в защите' },
+      { name: 'API Gateway', id: 'api-gateway', kind: 'decomp', why: 'лимиты часто живут на шлюзе' },
+    ],
+    code: { good: RATELIMIT_GOOD, bad: RATELIMIT_BAD },
+    viz: 'rate-limiter',
+    live: 'rate-limiter',
+    backend: '/patterns/microservices/resilience/rate-limiter',
+    preview: {
+      instances: [
+        { hash: 'req 1', createdBy: 'allowed' },
+        { hash: 'req 2', createdBy: 'allowed' },
+        { hash: 'req 3', createdBy: 'allowed' },
+        { hash: 'req 4', createdBy: '429' },
+        { hash: 'req 5', createdBy: '429' },
+      ],
+      frame: { actor: 'req 4', action: 'tryAcquire', result: '✗ 429 Too Many Requests', ok: false },
+    },
+  },
   saga: {
     name: 'Saga',
     ru: 'Сага',
